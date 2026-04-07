@@ -46,9 +46,10 @@
 UART_HandleTypeDef huart2;
 
 /* USER CODE BEGIN PV */
-char rxData = 0;
-char txBuffer[50];
-volatile uint8_t txBusy = 0;
+char rxByte = 0;
+char mainBuffer[100];
+uint8_t bufferIndex = 0;
+volatile uint8_t stringReady = 0;
 
 /* USER CODE END PV */
 
@@ -67,16 +68,24 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 {
   if (huart->Instance == USART2)
   {
-    // 1. Prepare the message immediately
-    // Using %c shows the letter, %d shows the ASCII number
-    int len = sprintf(txBuffer, "Received: %c (ASCII: %d)\r\n", rxData, rxData);
+    // 1. Check for the "Enter" key (Carriage Return)
+    if (rxByte == '\r' || rxByte == '\n') 
+    {
+      mainBuffer[bufferIndex] = '\0'; // Add NULL terminator to make it a C-string
+      stringReady = 1;                // Tell main() we are done
+      bufferIndex = 0;                // Reset index for the NEXT string
+    }
+    else 
+    {
+      // 2. Otherwise, add the character to the buffer
+      if (bufferIndex < 99) // Prevent buffer overflow
+      {
+        mainBuffer[bufferIndex++] = rxByte;
+      }
+    }
 
-    // 2. Start TX (We use the blocking version here for simplicity 
-    // to ensure the message actually goes out before the next RX)
-    HAL_UART_Transmit(&huart2, (uint8_t*)txBuffer, len, 100);
-
-    // 3. Restart RX immediately (Mandatory)
-    HAL_UART_Receive_IT(&huart2, (uint8_t*)&rxData, 1);
+    // 3. Restart the listener for the NEXT single byte
+    HAL_UART_Receive_IT(&huart2, (uint8_t*)&rxByte, 1);
   }
 }
 
@@ -115,7 +124,7 @@ int main(void)
   MX_GPIO_Init();
   MX_USART2_UART_Init();
   /* USER CODE BEGIN 2 */
-  HAL_UART_Receive_IT(&huart2, (uint8_t*)&rxData, 1);
+  HAL_UART_Receive_IT(&huart2, (uint8_t*)&rxByte, 1);
 
   /* USER CODE END 2 */
 
@@ -124,6 +133,15 @@ int main(void)
   HAL_GPIO_WritePin(GPIOB, GPIO_PIN_3, GPIO_PIN_SET);
   while (1)
   {
+    if (stringReady)
+    {
+      stringReady = 0; // Reset flag
+
+      // Print the whole captured string back to the terminal
+      char outMsg[120];
+      int len = sprintf(outMsg, "String Received: %s\r\n", mainBuffer);
+      HAL_UART_Transmit(&huart2, (uint8_t*)outMsg, len, 100);
+    }
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */

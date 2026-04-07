@@ -46,10 +46,9 @@
 UART_HandleTypeDef huart2;
 
 /* USER CODE BEGIN PV */
-char msg[30];
-char txData = ' ';
-char rxData = ' ';
-volatile uint8_t dataReadyFlag = 0;
+char rxData = 0;
+char txBuffer[50];
+volatile uint8_t txBusy = 0;
 
 /* USER CODE END PV */
 
@@ -63,15 +62,25 @@ static void MX_USART2_UART_Init(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 {
   if (huart->Instance == USART2)
   {
-    txData = rxData;
-    dataReadyFlag = 1;
-  }
+    // 1. Prepare the message immediately
+    // Using %c shows the letter, %d shows the ASCII number
+    int len = sprintf(txBuffer, "Received: %c (ASCII: %d)\r\n", rxData, rxData);
 
+    // 2. Start TX (We use the blocking version here for simplicity 
+    // to ensure the message actually goes out before the next RX)
+    HAL_UART_Transmit(&huart2, (uint8_t*)txBuffer, len, 100);
+
+    // 3. Restart RX immediately (Mandatory)
+    HAL_UART_Receive_IT(&huart2, (uint8_t*)&rxData, 1);
+  }
 }
+
+
 
 /* USER CODE END 0 */
 
@@ -106,8 +115,7 @@ int main(void)
   MX_GPIO_Init();
   MX_USART2_UART_Init();
   /* USER CODE BEGIN 2 */
-  HAL_UART_Receive_IT(&huart2, &rxData, 1);
-  HAL_UART_Transmit_IT(&huart2, &txData, 1);
+  HAL_UART_Receive_IT(&huart2, (uint8_t*)&rxData, 1);
 
   /* USER CODE END 2 */
 
@@ -116,22 +124,6 @@ int main(void)
   HAL_GPIO_WritePin(GPIOB, GPIO_PIN_3, GPIO_PIN_SET);
   while (1)
   {
-    if (dataReadyFlag)
-    {
-      dataReadyFlag = 0;
-
-      int len = sprintf(msg, "Received Char: %c\r\n", rxData);
-      HAL_UART_Transmit(&huart2, (uint8_t*)msg, len, 100);
-
-      // Blink LED to indicate trramission
-      HAL_GPIO_WritePin(GPIOA, GPIO_PIN_8, GPIO_PIN_SET);
-      HAL_Delay(200);
-      HAL_GPIO_WritePin(GPIOA, GPIO_PIN_8, GPIO_PIN_RESET);
-
-      HAL_UART_Transmit_IT(&huart2, (uint8_t*)&txData, 1);
-      HAL_UART_Receive_IT(&huart2, (uint8_t*)&rxData, 1);
-
-    }
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -238,9 +230,13 @@ static void MX_GPIO_Init(void)
 
   /* GPIO Ports Clock Enable */
   __HAL_RCC_GPIOA_CLK_ENABLE();
+  __HAL_RCC_GPIOB_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOA, GPIO_PIN_8, GPIO_PIN_RESET);
+
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_3, GPIO_PIN_RESET);
 
   /*Configure GPIO pin : PA8 */
   GPIO_InitStruct.Pin = GPIO_PIN_8;
@@ -248,6 +244,13 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : PB3 */
+  GPIO_InitStruct.Pin = GPIO_PIN_3;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
   /* USER CODE BEGIN MX_GPIO_Init_2 */
 

@@ -44,10 +44,13 @@
 
 /* Private variables ---------------------------------------------------------*/
 UART_HandleTypeDef huart2;
+DMA_HandleTypeDef hdma_usart2_rx;
 
 /* USER CODE BEGIN PV */
 char rxByte = 0;
 char mainBuffer[100];
+char processingBuffer[150];
+char uartLogBuffer[150];
 uint8_t bufferIndex = 0;
 volatile uint8_t stringReady = 0;
 
@@ -56,6 +59,7 @@ volatile uint8_t stringReady = 0;
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
+static void MX_DMA_Init(void);
 static void MX_USART2_UART_Init(void);
 /* USER CODE BEGIN PFP */
 
@@ -64,28 +68,17 @@ static void MX_USART2_UART_Init(void);
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 
-void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
+void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size)
 {
-  if (huart->Instance == USART2)
+  if (huart->Instance == USART2 && Size > 0)
   {
-    // 1. Check for the "Enter" key (Carriage Return)
-    if (rxByte == '\r' || rxByte == '\n') 
-    {
-      mainBuffer[bufferIndex] = '\0'; // Add NULL terminator to make it a C-string
-      stringReady = 1;                // Tell main() we are done
-      bufferIndex = 0;                // Reset index for the NEXT string
-    }
-    else 
-    {
-      // 2. Otherwise, add the character to the buffer
-      if (bufferIndex < 99) // Prevent buffer overflow
-      {
-        mainBuffer[bufferIndex++] = rxByte;
-      }
-    }
+    // 1. Snapshot the data
+    memcpy(processingBuffer, mainBuffer, Size);
+    processingBuffer[Size] = '\0'; 
+    stringReady = 1;
 
-    // 3. Restart the listener for the NEXT single byte
-    HAL_UART_Receive_IT(&huart2, (uint8_t*)&rxByte, 1);
+    // 2. IMPORTANT: Manually restart DMA to reset the pointer to Index 0
+    HAL_UARTEx_ReceiveToIdle_DMA(&huart2, (uint8_t*)mainBuffer, 100);
   }
 }
 
@@ -122,9 +115,13 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
+  MX_DMA_Init();
   MX_USART2_UART_Init();
   /* USER CODE BEGIN 2 */
-  HAL_UART_Receive_IT(&huart2, (uint8_t*)&rxByte, 1);
+
+  // Start receiving into mainBuffer. 
+  // It will automatically wrap around because of Circular mode.
+  HAL_UARTEx_ReceiveToIdle_DMA(&huart2, (uint8_t*)mainBuffer, 100);
 
   /* USER CODE END 2 */
 
@@ -138,9 +135,11 @@ int main(void)
       stringReady = 0; // Reset flag
 
       // Print the whole captured string back to the terminal
-      char outMsg[120];
-      int len = sprintf(outMsg, "String Received: %s\r\n", mainBuffer);
-      HAL_UART_Transmit(&huart2, (uint8_t*)outMsg, len, 100);
+      int len = sprintf(uartLogBuffer, "String Received: %s\r\n", mainBuffer);
+      HAL_UART_Transmit(&huart2, (uint8_t*)uartLogBuffer, len, 100);
+
+      memset(processingBuffer, 0, sizeof(processingBuffer));
+
     }
     /* USER CODE END WHILE */
 
@@ -231,6 +230,22 @@ static void MX_USART2_UART_Init(void)
   /* USER CODE BEGIN USART2_Init 2 */
 
   /* USER CODE END USART2_Init 2 */
+
+}
+
+/**
+  * Enable DMA controller clock
+  */
+static void MX_DMA_Init(void)
+{
+
+  /* DMA controller clock enable */
+  __HAL_RCC_DMA1_CLK_ENABLE();
+
+  /* DMA interrupt init */
+  /* DMA1_Channel6_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA1_Channel6_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(DMA1_Channel6_IRQn);
 
 }
 
